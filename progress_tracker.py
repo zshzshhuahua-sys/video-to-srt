@@ -8,7 +8,7 @@ from progress_state import (
     StageProgress,
     ProcessingStatus,
 )
-from exceptions import VideoProcessingError
+from exceptions import VideoProcessingError, ErrorSeverity
 
 
 class ProgressTracker:
@@ -141,11 +141,7 @@ class ProgressTracker:
         self.task.end_time = datetime.now()
         self.task.error = VideoProcessingError(
             stage=self._get_stage_processing_stage(stage_name),
-            severity=VideoProcessingError(
-                stage=self._get_stage_processing_stage(stage_name),
-                severity=VideoProcessingError,
-                message=error_message,
-            ).severity if hasattr(VideoProcessingError, 'severity') else None,
+            severity=ErrorSeverity.FATAL,
             message=error_message,
         )
 
