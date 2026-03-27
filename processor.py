@@ -8,8 +8,10 @@ import tempfile
 from typing import Optional, Callable, TYPE_CHECKING
 from whisper_engine import WhisperEngine
 from srt_splitter import SRTSplitter
+from audio_segmenter import AudioSegmenter
 from config import (
     AUDIO_SAMPLE_RATE,
+    AUDIO_SEGMENT_DURATION,
     SEGMENT_DURATION,
     SUPPORTED_FORMATS,
     TEMP_DIR,
@@ -59,6 +61,7 @@ class VideoProcessor:
         # 初始化组件
         self.whisper = WhisperEngine(model_name)
         self.splitter = SRTSplitter(split_size)
+        self.segmenter = AudioSegmenter(segment_duration=AUDIO_SEGMENT_DURATION)
 
         # 初始化断点管理器
         self.checkpoint_manager = CheckpointManager()
@@ -141,19 +144,8 @@ class VideoProcessor:
                 self.progress_callback(5, "提取音频...")
                 self.progress_callback(30, "音频提取完成")
 
-            # Step 2: Whisper 识别
-            segments = self._transcribe_audio(audio_path)
-
-            # 保存断点 ( transcription 完成)
-            checkpoint = Checkpoint(
-                video_path=video_path,
-                video_name=video_name,
-                audio_path=audio_path,
-                processed_segments=segments,
-                last_segment_index=len(segments) - 1 if segments else 0,
-                stage="transcription_completed"
-            )
-            self.checkpoint_manager.save_checkpoint(checkpoint)
+            # Step 2: Whisper 识别（分段转写）
+            segments = self._transcribe_audio(audio_path, video_path=video_path, video_name=video_name, checkpoint=checkpoint)
 
             if progress_tracker is not None:
                 progress_tracker.update_stage("transcription", 100, "语音识别完成")
@@ -200,6 +192,11 @@ class VideoProcessor:
             if progress_tracker is not None:
                 progress_tracker.fail_stage("audio_extraction", str(AudioExtractionError))
             raise
+        except TranscriptionError as e:
+            error_msg = f"语音识别失败: {str(e)}"
+            if progress_tracker is not None:
+                progress_tracker.fail_stage("transcription", error_msg)
+            raise
         except Exception as e:
             self._cleanup_temp()
             error_msg = f"处理失败: {str(e)}"
@@ -240,17 +237,103 @@ class VideoProcessor:
             stderr_str = e.stderr.decode() if e.stderr else str(e)
             raise AudioExtractionError.from_ffmpeg_error(stderr_str, video_path)
 
-    def _transcribe_audio(self, audio_path: str) -> list:
+    def _transcribe_audio(self, audio_path: str, video_path: str = None, video_name: str = None, checkpoint: Checkpoint = None) -> list:
         """
-        使用 Whisper 识别音频
+        使用 Whisper 识别音频（分段转写，防止长音频卡死）
 
         Args:
             audio_path: 音频文件路径
+            video_path: 原始视频文件路径（用于断点记录）
+            video_name: 原始视频文件名（用于断点记录）
+            checkpoint: 可选的断点，用于恢复已完成的段落
 
         Returns:
             list: 字幕段列表
+
+        Raises:
+            TranscriptionError: 当语音识别失败时
         """
-        return self.whisper.transcribe_with_timestamps(audio_path, language="zh")
+        import traceback
+        from exceptions import TranscriptionError
+
+        # Step 1: 将音频分段
+        self.progress_callback(35, "正在将音频分段...")
+        segment_paths = self.segmenter.split_by_duration(audio_path)
+        total_segments = len(segment_paths)
+        self.progress_callback(35, f"音频已分成 {total_segments} 段")
+
+        # 确定起始段落索引（用于恢复）
+        start_index = 0
+        all_segments: list = []
+        if checkpoint and checkpoint.processed_segments:
+            # 恢复：找出已完成的段落数
+            # processed_segments 是合并后的完整结果，通过 last_segment_index 判断
+            start_index = checkpoint.last_segment_index + 1
+            all_segments = list(checkpoint.processed_segments)
+            self.progress_callback(35, f"从第 {start_index + 1}/{total_segments} 段继续...")
+        else:
+            self.progress_callback(35, f"开始第 1/{total_segments} 段转写...")
+
+        # Step 2: 逐段转写
+        try:
+            segment_results = []  # 收集每段的原始结果（未合并）
+            for i in range(start_index, total_segments):
+                segment_path = segment_paths[i]
+                segment_num = i + 1
+
+                # 进度计算：35% - 80% 之间，每段均匀分配
+                segment_progress = 35 + int((segment_num / total_segments) * 45)
+                self.progress_callback(
+                    segment_progress,
+                    f"正在转写第 {segment_num}/{total_segments} 段..."
+                )
+
+                # 转写当前段
+                def whisper_progress_callback(percent, message, detail=None):
+                    """将 whisper 进度回调转换为 processor 回调"""
+                    self.progress_callback(
+                        segment_progress + int(percent * 0.45 / total_segments),
+                        f"第 {segment_num}/{total_segments} 段: {message}"
+                    )
+
+                segment_result = self.whisper.transcribe_with_timestamps(
+                    segment_path,
+                    language="zh",
+                    progress_callback=whisper_progress_callback
+                )
+
+                # 收集每段结果，稍后合并
+                segment_results.append(segment_result)
+
+                # 每段完成后保存断点
+                # 注意：这里保存的是合并后（带偏移）的结果，便于恢复
+                merged_so_far = self.segmenter.merge_transcripts(segment_results)
+                current_checkpoint = Checkpoint(
+                    video_path=checkpoint.video_path if checkpoint and hasattr(checkpoint, 'video_path') else (video_path or audio_path),
+                    video_name=checkpoint.video_name if checkpoint and hasattr(checkpoint, 'video_name') else (video_name or os.path.basename(audio_path)),
+                    audio_path=audio_path,
+                    processed_segments=merged_so_far,
+                    last_segment_index=i,
+                    stage="transcription_in_progress"
+                )
+                self.checkpoint_manager.save_checkpoint(current_checkpoint)
+
+                # 清理已处理的分段文件（节省空间）
+                self._cleanup([segment_path])
+
+            # 最后合并所有结果（时间戳已正确偏移）
+            all_segments = self.segmenter.merge_transcripts(segment_results)
+            self.progress_callback(80, f"语音识别完成，共 {len(all_segments)} 个片段")
+            return all_segments
+
+        except Exception as e:
+            error_detail = f"语音识别失败: {str(e)}\n\n详细错误:\n{traceback.format_exc()}"
+            self.progress_callback(-1, error_detail)
+            raise TranscriptionError(
+                message=f"语音识别失败: {str(e)}",
+                original_error=e,
+                suggestion="请检查音频文件是否损坏，或尝试使用更小的 Whisper 模型"
+            ) from e
 
     def _generate_srt(self, segments: list, original_filename: str) -> str:
         """

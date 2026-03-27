@@ -20,6 +20,10 @@ AUDIO_SAMPLE_RATE = int(os.environ.get("AUDIO_SAMPLE_RATE", "16000"))
 # 视频分段时长 (秒) - 30分钟 - 支持环境变量覆盖: SEGMENT_DURATION
 SEGMENT_DURATION = int(os.environ.get("SEGMENT_DURATION", str(30 * 60)))
 
+# 音频转写分段时长 (秒) - 10分钟 - 支持环境变量覆盖: AUDIO_SEGMENT_DURATION
+# 用于解决长音频转写时卡死的问题
+AUDIO_SEGMENT_DURATION = int(os.environ.get("AUDIO_SEGMENT_DURATION", str(10 * 60)))
+
 # SRT 切分阈值 (10MB) - 支持环境变量覆盖: SRT_SPLIT_SIZE
 SRT_SPLIT_SIZE = int(os.environ.get("SRT_SPLIT_SIZE", str(10 * 1024**2)))
 

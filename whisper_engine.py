@@ -43,19 +43,29 @@ class WhisperEngine:
 
     def _load_model(self):
         """加载 Whisper 模型"""
+        import sys
+        import logging
+
+        # 配置日志同时输出到 stdout 和文件
+        logger = logging.getLogger("whisper_engine")
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter('[Whisper] %(levelname)s: %(message)s'))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
         if self.model is not None:
             return  # 已经加载
 
-        print(f"[Whisper] 加载模型: {self.model_name}")
+        logger.info(f"加载模型: {self.model_name} (这可能需要几分钟...)")
         start = time.time()
 
         try:
             # 使用 whisper.cpp 的 Python bindings
             # 会自动检测 CoreML 可用性
             self.model = whisper.load_model(self.model_name)
-            print(f"[Whisper] 模型加载完成，耗时: {time.time() - start:.1f}s")
+            logger.info(f"模型加载完成，耗时: {time.time() - start:.1f}s")
         except Exception as e:
-            print(f"[Whisper] 模型加载失败: {e}")
+            logger.error(f"模型加载失败: {e}")
             raise
 
     def _ensure_model_loaded(self):
@@ -93,12 +103,22 @@ class WhisperEngine:
         Returns:
             list: 字幕段列表，每段包含 start, end, text
         """
+        import sys
+        import logging
+
+        logger = logging.getLogger("whisper_engine")
+        if not logger.handlers:
+            handler = logging.StreamHandler(sys.stdout)
+            handler.setFormatter(logging.Formatter('[Whisper] %(levelname)s: %(message)s'))
+            logger.addHandler(handler)
+            logger.setLevel(logging.INFO)
+
         self._ensure_model_loaded()
 
         if progress_callback:
             progress_callback(0, f"开始识别音频: {audio_path}", None)
 
-        print(f"[Whisper] 开始识别: {audio_path}")
+        logger.info(f"开始识别: {audio_path}")
 
         # 构建识别参数
         options = {
@@ -111,6 +131,10 @@ class WhisperEngine:
         try:
             # 执行识别
             start = time.time()
+            logger.info("Whisper 推理中，请耐心等待...")
+            if progress_callback:
+                progress_callback(10, "Whisper 推理中，请耐心等待...", None)
+
             result = self.model.transcribe(audio_path, **options)
             elapsed = time.time() - start
 
@@ -130,8 +154,8 @@ class WhisperEngine:
             if progress_callback:
                 progress_callback(50, f"识别完成，耗时: {elapsed:.1f}s", {"stage": "transcription", "segment": total_segments - 1, "total": total_segments})
 
-            print(f"[Whisper] 识别完成，耗时: {elapsed:.1f}s")
-            print(f"[Whisper] 识别出 {len(segments)} 个段落")
+            logger.info(f"识别完成，耗时: {elapsed:.1f}s")
+            logger.info(f"识别出 {len(segments)} 个段落")
 
             if progress_callback:
                 progress_callback(100, f"识别出 {len(segments)} 个段落", {"stage": "transcription", "segment": total_segments - 1, "total": total_segments})
@@ -139,10 +163,11 @@ class WhisperEngine:
             return segments
 
         except Exception as e:
+            import traceback
             error_msg = f"语音识别失败: {str(e)}"
-            print(f"[Whisper] {error_msg}")
+            logger.error(f"{error_msg}\n详细错误:\n{traceback.format_exc()}")
             if progress_callback:
-                progress_callback(-1, error_msg, None)
+                progress_callback(-1, f"{error_msg}\n{traceback.format_exc()}", None)
             raise
 
     def transcribe_with_timestamps(

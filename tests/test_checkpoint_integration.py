@@ -15,6 +15,7 @@ class TestProcessorCheckpoint:
         """测试处理视频时在片段完成后保存断点"""
         with patch('processor.WhisperEngine') as mock_engine_class, \
              patch('processor.SRTSplitter') as mock_splitter_class, \
+             patch('processor.AudioSegmenter') as mock_segmenter_class, \
              patch('processor.CheckpointManager') as mock_cm_class:
 
             mock_engine = MagicMock()
@@ -28,6 +29,14 @@ class TestProcessorCheckpoint:
             mock_splitter.split_if_needed.return_value = ["/tmp/test.srt"]
             mock_splitter_class.return_value = mock_splitter
 
+            mock_segmenter = MagicMock()
+            mock_segmenter.split_by_duration.return_value = ['/tmp/seg0.wav']
+            mock_segmenter.merge_transcripts.return_value = [
+                {"start": 0.0, "end": 2.5, "text": "第一句"},
+                {"start": 2.6, "end": 5.0, "text": "第二句"},
+            ]
+            mock_segmenter_class.return_value = mock_segmenter
+
             mock_cm_instance = MagicMock()
             # 确保 has_checkpoint 返回 False，这样不会进入断点恢复逻辑
             mock_cm_instance.has_checkpoint.return_value = False
@@ -37,6 +46,7 @@ class TestProcessorCheckpoint:
             from checkpoint_manager import Checkpoint, CheckpointManager
 
             vp = VideoProcessor()
+            vp.segmenter = mock_segmenter
 
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
                 video_path = f.name
@@ -63,6 +73,7 @@ class TestProcessorCheckpoint:
 
         with patch('processor.WhisperEngine') as mock_engine_class, \
              patch('processor.SRTSplitter') as mock_splitter_class, \
+             patch('processor.AudioSegmenter') as mock_segmenter_class, \
              patch('processor.CheckpointManager') as mock_cm_class:
 
             mock_engine = MagicMock()
@@ -72,6 +83,11 @@ class TestProcessorCheckpoint:
             mock_splitter = MagicMock()
             mock_splitter.split_if_needed.return_value = ["/tmp/test.srt"]
             mock_splitter_class.return_value = mock_splitter
+
+            mock_segmenter = MagicMock()
+            mock_segmenter.split_by_duration.return_value = ['/tmp/seg0.wav']
+            mock_segmenter.merge_transcripts.return_value = []
+            mock_segmenter_class.return_value = mock_segmenter
 
             mock_cm_instance = MagicMock()
             # 模拟有断点存在
@@ -91,6 +107,7 @@ class TestProcessorCheckpoint:
             from processor import VideoProcessor
 
             vp = VideoProcessor()
+            vp.segmenter = mock_segmenter
 
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
                 video_path = f.name
@@ -113,6 +130,7 @@ class TestProcessorCheckpoint:
 
         with patch('processor.WhisperEngine') as mock_engine_class, \
              patch('processor.SRTSplitter') as mock_splitter_class, \
+             patch('processor.AudioSegmenter') as mock_segmenter_class, \
              patch('processor.CheckpointManager') as mock_cm_class:
 
             mock_engine = MagicMock()
@@ -122,6 +140,11 @@ class TestProcessorCheckpoint:
             mock_splitter = MagicMock()
             mock_splitter.split_if_needed.return_value = ["/tmp/test.srt"]
             mock_splitter_class.return_value = mock_splitter
+
+            mock_segmenter = MagicMock()
+            mock_segmenter.split_by_duration.return_value = ['/tmp/seg0.wav']
+            mock_segmenter.merge_transcripts.return_value = [{"start": 0.0, "end": 2.5, "text": "已处理"}]
+            mock_segmenter_class.return_value = mock_segmenter
 
             mock_cm_instance = MagicMock()
             # 模拟有断点存在，且包含已处理的片段
@@ -140,6 +163,7 @@ class TestProcessorCheckpoint:
             from processor import VideoProcessor
 
             vp = VideoProcessor()
+            vp.segmenter = mock_segmenter
 
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
                 video_path = f.name
@@ -160,6 +184,7 @@ class TestProcessorCheckpoint:
         """测试处理成功后删除断点"""
         with patch('processor.WhisperEngine') as mock_engine_class, \
              patch('processor.SRTSplitter') as mock_splitter_class, \
+             patch('processor.AudioSegmenter') as mock_segmenter_class, \
              patch('processor.CheckpointManager') as mock_cm_class:
 
             mock_engine = MagicMock()
@@ -170,6 +195,11 @@ class TestProcessorCheckpoint:
             mock_splitter.split_if_needed.return_value = ["/tmp/test.srt"]
             mock_splitter_class.return_value = mock_splitter
 
+            mock_segmenter = MagicMock()
+            mock_segmenter.split_by_duration.return_value = ['/tmp/seg0.wav']
+            mock_segmenter.merge_transcripts.return_value = []
+            mock_segmenter_class.return_value = mock_segmenter
+
             mock_cm_instance = MagicMock()
             mock_cm_instance.has_checkpoint.return_value = False
             mock_cm_class.return_value = mock_cm_instance
@@ -177,6 +207,7 @@ class TestProcessorCheckpoint:
             from processor import VideoProcessor
 
             vp = VideoProcessor()
+            vp.segmenter = mock_segmenter
 
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
                 video_path = f.name

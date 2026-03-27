@@ -151,9 +151,12 @@ def log(message: str):
     st.session_state.logs.append(f"[{timestamp}] {message}")
 
 
-def progress_callback(percent: int, message: str):
+def progress_callback(percent: int, message: str, detail=None):
     """进度回调"""
     log(message)
+    # 错误时显示详细错误
+    if percent < 0:
+        st.error(message)
     return percent
 
 
@@ -286,37 +289,43 @@ with col2:
                         col_resume, col_restart = st.columns(2)
                         with col_resume:
                             if st.button(f"继续处理", key=f"resume_{safe_name}"):
-                                # 立即保存文件
-                                with open(path, "wb") as out:
-                                    out.write(f.read())
-                                saved_files.append((path, safe_name))
+                                # 先设置状态，避免 rerun 后重复进入此分支
                                 st.session_state.resume_choices[safe_name] = True
+                                # 用 getvalue() 读取所有字节，避免消耗流
+                                file_bytes = f.getvalue()
+                                with open(path, "wb") as out:
+                                    out.write(file_bytes)
+                                saved_files.append((path, safe_name))
                                 st.rerun()
                         with col_restart:
                             if st.button(f"重新开始", key=f"restart_{safe_name}"):
                                 checkpoint_manager.delete_checkpoint(safe_name)
-                                # 立即保存文件
-                                with open(path, "wb") as out:
-                                    out.write(f.read())
-                                saved_files.append((path, safe_name))
+                                # 先设置状态，避免 rerun 后重复进入此分支
                                 st.session_state.resume_choices[safe_name] = False
+                                file_bytes = f.getvalue()
+                                with open(path, "wb") as out:
+                                    out.write(file_bytes)
+                                saved_files.append((path, safe_name))
                                 st.success(f"已清除 {safe_name} 的断点，将重新开始处理")
                         # 用户还没做选择，不保存文件也不继续
                         continue
                     elif resume_action is True:
                         # 用户选择继续处理，保留断点
+                        file_bytes = f.getvalue()
                         with open(path, "wb") as out:
-                            out.write(f.read())
+                            out.write(file_bytes)
                         saved_files.append((path, safe_name))
                     elif resume_action is False:
                         # 用户选择重新开始（断点已删除）
+                        file_bytes = f.getvalue()
                         with open(path, "wb") as out:
-                            out.write(f.read())
+                            out.write(file_bytes)
                         saved_files.append((path, safe_name))
                     else:
                         # 没有断点，正常保存
+                        file_bytes = f.getvalue()
                         with open(path, "wb") as out:
-                            out.write(f.read())
+                            out.write(file_bytes)
                         saved_files.append((path, safe_name))
 
                 # 如果有待确认的文件，先不处理
@@ -361,8 +370,11 @@ with col2:
                             log(f"✅ 完成: {result}")
 
                     except Exception as e:
-                        st.session_state.results.append(("error", str(e)))
+                        import traceback
+                        error_detail = traceback.format_exc()
+                        st.session_state.results.append(("error", str(e), error_detail))
                         log(f"❌ 失败: {str(e)}")
+                        log(f"详细错误:\n{error_detail}")
 
                 # 清理上传文件
                 for path, _ in saved_files:
@@ -391,11 +403,15 @@ if st.session_state.results:
     st.divider()
     st.subheader("📋 处理结果")
 
-    for status, path in st.session_state.results:
-        if status == "success":
-            st.success(f"✅ {path}")
+    for result in st.session_state.results:
+        if result[0] == "success":
+            st.success(f"✅ {result[1]}")
         else:
-            st.error(f"❌ {path}")
+            st.error(f"❌ {result[1]}")
+            # 显示详细错误信息
+            if len(result) > 2 and result[2]:
+                with st.expander("查看详细错误信息", expanded=False):
+                    st.text(result[2])
 
 # 底部信息
 st.divider()

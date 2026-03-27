@@ -145,6 +145,7 @@ class TestTranscribeAudio:
     def test_transcribe_audio_returns_segments(self):
         """测试音频识别返回字幕段"""
         with patch('processor.WhisperEngine') as mock_engine_class, \
+             patch('processor.AudioSegmenter') as mock_segmenter_class, \
              patch('processor.SRTSplitter'):
             mock_engine = MagicMock()
             mock_engine.transcribe_with_timestamps.return_value = [
@@ -153,8 +154,17 @@ class TestTranscribeAudio:
             ]
             mock_engine_class.return_value = mock_engine
 
+            mock_segmenter = MagicMock()
+            mock_segmenter.split_by_duration.return_value = ['/tmp/seg0.wav']
+            mock_segmenter.merge_transcripts.return_value = [
+                {"start": 0.0, "end": 2.5, "text": "测试"},
+                {"start": 2.6, "end": 5.0, "text": "第二句"},
+            ]
+            mock_segmenter_class.return_value = mock_segmenter
+
             from processor import VideoProcessor
             vp = VideoProcessor()
+            vp.segmenter = mock_segmenter
 
             result = vp._transcribe_audio("dummy.wav")
 
@@ -165,13 +175,20 @@ class TestTranscribeAudio:
     def test_transcribe_audio_default_language(self):
         """测试音频识别默认语言是中文"""
         with patch('processor.WhisperEngine') as mock_engine_class, \
+             patch('processor.AudioSegmenter') as mock_segmenter_class, \
              patch('processor.SRTSplitter'):
             mock_engine = MagicMock()
             mock_engine.transcribe_with_timestamps.return_value = []
             mock_engine_class.return_value = mock_engine
 
+            mock_segmenter = MagicMock()
+            mock_segmenter.split_by_duration.return_value = ['/tmp/seg0.wav']
+            mock_segmenter.merge_transcripts.return_value = []
+            mock_segmenter_class.return_value = mock_segmenter
+
             from processor import VideoProcessor
             vp = VideoProcessor()
+            vp.segmenter = mock_segmenter
 
             vp._transcribe_audio("dummy.wav")
 
@@ -289,7 +306,8 @@ class TestProcessVideo:
     def test_process_video_calls_callback(self):
         """测试处理视频时调用进度回调"""
         with patch('processor.WhisperEngine') as mock_engine_class, \
-             patch('processor.SRTSplitter') as mock_splitter_class:
+             patch('processor.SRTSplitter') as mock_splitter_class, \
+             patch('processor.AudioSegmenter') as mock_segmenter_class:
             mock_engine = MagicMock()
             mock_engine.transcribe_with_timestamps.return_value = []
             mock_engine_class.return_value = mock_engine
@@ -298,12 +316,18 @@ class TestProcessVideo:
             mock_splitter.split_if_needed.return_value = ["/tmp/test.srt"]
             mock_splitter_class.return_value = mock_splitter
 
+            mock_segmenter = MagicMock()
+            mock_segmenter.split_by_duration.return_value = ['/tmp/seg0.wav']
+            mock_segmenter.merge_transcripts.return_value = []
+            mock_segmenter_class.return_value = mock_segmenter
+
             from processor import VideoProcessor
             callback_calls = []
             def callback(percent, message):
                 callback_calls.append((percent, message))
 
             vp = VideoProcessor(progress_callback=callback)
+            vp.segmenter = mock_segmenter
 
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
                 video_path = f.name
@@ -389,7 +413,8 @@ class TestProcessorProgress:
     def test_process_video_uses_progress_tracker(self):
         """测试 process_video 使用 progress_tracker"""
         with patch('processor.WhisperEngine') as mock_engine_class, \
-             patch('processor.SRTSplitter') as mock_splitter_class:
+             patch('processor.SRTSplitter') as mock_splitter_class, \
+             patch('processor.AudioSegmenter') as mock_segmenter_class:
 
             mock_engine = MagicMock()
             mock_engine.transcribe_with_timestamps.return_value = []
@@ -399,12 +424,18 @@ class TestProcessorProgress:
             mock_splitter.split_if_needed.return_value = ["/tmp/test.srt"]
             mock_splitter_class.return_value = mock_splitter
 
+            mock_segmenter = MagicMock()
+            mock_segmenter.split_by_duration.return_value = ['/tmp/seg0.wav']
+            mock_segmenter.merge_transcripts.return_value = []
+            mock_segmenter_class.return_value = mock_segmenter
+
             from processor import VideoProcessor
             from progress_tracker import ProgressTracker
 
             tracker = MagicMock(spec=ProgressTracker)
 
             vp = VideoProcessor()
+            vp.segmenter = mock_segmenter
 
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
                 video_path = f.name
@@ -425,7 +456,8 @@ class TestProcessorProgress:
     def test_stage_timing_recorded(self):
         """测试阶段时间被记录"""
         with patch('processor.WhisperEngine') as mock_engine_class, \
-             patch('processor.SRTSplitter') as mock_splitter_class:
+             patch('processor.SRTSplitter') as mock_splitter_class, \
+             patch('processor.AudioSegmenter') as mock_segmenter_class:
 
             mock_engine = MagicMock()
             mock_engine.transcribe_with_timestamps.return_value = []
@@ -434,6 +466,11 @@ class TestProcessorProgress:
             mock_splitter = MagicMock()
             mock_splitter.split_if_needed.return_value = ["/tmp/test.srt"]
             mock_splitter_class.return_value = mock_splitter
+
+            mock_segmenter = MagicMock()
+            mock_segmenter.split_by_duration.return_value = ['/tmp/seg0.wav']
+            mock_segmenter.merge_transcripts.return_value = []
+            mock_segmenter_class.return_value = mock_segmenter
 
             from processor import VideoProcessor
             from progress_tracker import ProgressTracker
@@ -448,6 +485,7 @@ class TestProcessorProgress:
                 )
 
                 vp = VideoProcessor()
+                vp.segmenter = mock_segmenter
 
                 with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False, dir=tmpdir) as f:
                     video_path = f.name
